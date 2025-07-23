@@ -1,6 +1,6 @@
 esphome:
-  name: "testing-lolin"
-  friendly_name: testing lolin
+  name: "desktop-pomodoro"
+  friendly_name: Desktop Pomodoro
   min_version: 2025.5.0
   name_add_mac_suffix: false
 
@@ -40,9 +40,9 @@ light:
           lambda: |-
             Color color_to_use;
             if (id(timer_mode) == 0) { // Large timer mode
-              color_to_use = Color(id(large_timer_color_value));
+              color_to_use = Color(0x00FF00); // Fixed Green
             } else { // Small timer mode
-              color_to_use = Color(id(small_timer_color_value));
+              color_to_use = Color(0xFF0000); // Fixed Red
             }
             for (int i = 0; i < it.size(); i++) {
               if (i < id(led_index)) {
@@ -52,27 +52,7 @@ light:
               it[i] = Color::BLACK;
             }
 
-  - platform: template
-    name: "Large Timer Color"
-    id: large_timer_color_picker
-    rgb: true
-    on_turn_on:
-      lambda: |-
-        id(large_timer_color_value) = Color(x.get_red(), x.get_green(), x.get_blue()).to_int();
-        if (id(timer_mode) == 0) {
-          id(led_strip).turn_on().set_effect("Timer effect").perform();
-        }
-
-  - platform: template
-    name: "Small Timer Color"
-    id: small_timer_color_picker
-    rgb: true
-    on_turn_on:
-      lambda: |-
-        id(small_timer_color_value) = Color(x.get_red(), x.get_green(), x.get_blue()).to_int();
-        if (id(timer_mode) == 1) {
-          id(led_strip).turn_on().set_effect("Timer effect").perform();
-        }
+  
           
 
 display:
@@ -124,7 +104,9 @@ script:
           auto call = id(led_strip).turn_on();
           call.set_effect("Timer effect");
           call.perform();
-      - logger.log: "Large timer started with duration: %d minutes", id(large_timer_set_duration)
+      - logger.log: 
+          format: "Large timer started with duration: %d minutes"
+          args: [ 'id(large_timer_set_duration)' ]
 
   - id: start_small_timer_script
     then:
@@ -135,7 +117,9 @@ script:
           auto call = id(led_strip).turn_on();
           call.set_effect("Timer effect");
           call.perform();
-      - logger.log: "Small timer started with duration: %d minutes", id(small_timer_set_duration)
+      - logger.log: 
+          format: "Small timer started with duration: %d minutes"
+          args: [ 'id(small_timer_set_duration)' ]
 
   - id: decrement_led_script
     then:
@@ -204,7 +188,7 @@ number:
     step: 1
     mode: BOX
     initial_value: 40
-    on_value:
+    set_action:
       lambda: id(large_timer_set_duration) = x;
 
   - platform: template
@@ -215,7 +199,7 @@ number:
     step: 1
     mode: BOX
     initial_value: 5
-    on_value:
+    set_action:
       lambda: id(small_timer_set_duration) = x;
 
 globals:
@@ -249,12 +233,4 @@ globals:
     restore_value: no
     initial_value: '40'
 
-  - id: large_timer_color_value
-    type: int
-    restore_value: yes
-    initial_value: '0x007F00' # Initial green color (RGB)
-
-  - id: small_timer_color_value
-    type: int
-    restore_value: yes
-    initial_value: '0x7F0000' # Initial red color (RGB)
+  
