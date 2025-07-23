@@ -1,0 +1,260 @@
+esphome:
+  name: "testing-lolin"
+  friendly_name: testing lolin
+  min_version: 2025.5.0
+  name_add_mac_suffix: false
+
+esp32:
+  board: lolin32_lite
+  framework:
+    type: esp-idf
+
+logger:
+  level: info
+
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+ota:
+  - platform: esphome
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+light:
+  - platform: esp32_rmt_led_strip
+    id: led_strip
+    pin: GPIO16
+    chipset: WS2812
+    num_leds: 8
+    rgb_order: GRB
+    name: "LED Strip"
+    effects: 
+      - addressable_rainbow:
+          name: "Rainbow"
+      - addressable_lambda: 
+          name: "Timer effect"
+          update_interval: 16ms
+          lambda: |-
+            Color color_to_use;
+            if (id(timer_mode) == 0) { // Large timer mode
+              color_to_use = Color(id(large_timer_color_value));
+            } else { // Small timer mode
+              color_to_use = Color(id(small_timer_color_value));
+            }
+            for (int i = 0; i < it.size(); i++) {
+              if (i < id(led_index)) {
+                it[i] = color_to_use;
+                continue;
+              }
+              it[i] = Color::BLACK;
+            }
+
+  - platform: template
+    name: "Large Timer Color"
+    id: large_timer_color_picker
+    rgb: true
+    on_turn_on:
+      lambda: |-
+        id(large_timer_color_value) = Color(x.get_red(), x.get_green(), x.get_blue()).to_int();
+        if (id(timer_mode) == 0) {
+          id(led_strip).turn_on().set_effect("Timer effect").perform();
+        }
+
+  - platform: template
+    name: "Small Timer Color"
+    id: small_timer_color_picker
+    rgb: true
+    on_turn_on:
+      lambda: |-
+        id(small_timer_color_value) = Color(x.get_red(), x.get_green(), x.get_blue()).to_int();
+        if (id(timer_mode) == 1) {
+          id(led_strip).turn_on().set_effect("Timer effect").perform();
+        }
+          
+
+display:
+    platform: tm1637
+    id: tm1637_display
+    clk_pin: GPIO19
+    dio_pin: GPIO23
+    inverted: true
+    intensity: 0
+    length: 4
+    update_interval: never
+                
+binary_sensor:
+  - platform: gpio
+    pin:
+      number: GPIO17
+      mode: INPUT_PULLUP
+      inverted: true
+    name: "Start Large Timer Button"
+    id: start_large_timer_button
+    filters:
+      - delayed_on: 10ms
+      - delayed_off: 10ms
+    on_press:
+      then:
+        - script.execute: start_large_timer_script
+
+  - platform: gpio
+    pin:
+      number: GPIO18
+      mode: INPUT_PULLUP
+      inverted: true
+    name: "Start Small Timer Button"
+    id: start_small_timer_button
+    filters:
+      - delayed_on: 10ms
+      - delayed_off: 10ms
+    on_press:
+      then:
+        - script.execute: start_small_timer_script
+
+script:
+  - id: start_large_timer_script
+    then:
+      - lambda: |-
+          id(timer) = id(large_timer_set_duration);
+          id(timer_mode) = 0; // Green
+          id(current_total_duration) = id(large_timer_set_duration);
+          auto call = id(led_strip).turn_on();
+          call.set_effect("Timer effect");
+          call.perform();
+      - logger.log: "Large timer started with duration: %d minutes", id(large_timer_set_duration)
+
+  - id: start_small_timer_script
+    then:
+      - lambda: |-
+          id(timer) = id(small_timer_set_duration);
+          id(timer_mode) = 1; // Red
+          id(current_total_duration) = id(small_timer_set_duration);
+          auto call = id(led_strip).turn_on();
+          call.set_effect("Timer effect");
+          call.perform();
+      - logger.log: "Small timer started with duration: %d minutes", id(small_timer_set_duration)
+
+  - id: decrement_led_script
+    then:
+      - lambda: |-
+          if (id(timer) > 0) {
+            id(timer) -= 1;
+            if (id(current_total_duration) > 0) {
+              id(led_index) = (id(timer) * 8) / id(current_total_duration);
+            } else {
+              id(led_index) = 0; // Avoid division by zero
+            }
+            auto call = id(led_strip).turn_on();
+            call.set_effect("Timer effect");
+            call.perform();
+          } else {
+            auto call = id(led_strip).turn_on();
+            call.set_effect("Rainbow");
+            call.perform();
+            id(blink_display)->execute();
+          }
+      - logger.log: "LED index decremented"
+  
+  - id: blink_display
+    mode: restart
+    then:
+      - lambda: |-
+          id(tm1637_display).printf("____");
+          id(tm1637_display).display();
+      - delay: 200ms
+      - lambda: |-
+          id(tm1637_display).printf("----");
+          id(tm1637_display).display();
+      - delay: 200ms
+      - lambda: |-
+          id(tm1637_display).printf("****");
+          id(tm1637_display).display();
+      - delay: 200ms
+      - lambda: |-
+          id(tm1637_display).printf("----");
+          id(tm1637_display).display();
+      - delay: 200ms
+      - lambda: |-
+          id(tm1637_display).printf("____");
+          id(tm1637_display).display();
+      - delay: 200ms
+      
+
+interval:
+  - interval: 1min
+    then:
+      - script.execute: decrement_led_script
+  - interval: 1s
+    then:
+      - if:
+          condition:
+            lambda: 'return id(timer) <= 0;'
+          then:
+            - script.execute: blink_display
+
+number:
+  - platform: template
+    name: "Large Timer Duration"
+    id: large_timer_duration
+    min_value: 1
+    max_value: 120
+    step: 1
+    mode: BOX
+    initial_value: 40
+    on_value:
+      lambda: id(large_timer_set_duration) = x;
+
+  - platform: template
+    name: "Small Timer Duration"
+    id: small_timer_duration
+    min_value: 1
+    max_value: 30
+    step: 1
+    mode: BOX
+    initial_value: 5
+    on_value:
+      lambda: id(small_timer_set_duration) = x;
+
+globals:
+  - id: timer
+    type: int
+    restore_value: no
+    initial_value: '40'
+
+  - id: led_index
+    type: int
+    restore_value: no
+    initial_value: '8'
+
+  - id: timer_mode
+    type: int
+    restore_value: no
+    initial_value: '0' # 0 for large timer (green), 1 for small timer (red)
+
+  - id: large_timer_set_duration
+    type: int
+    restore_value: yes
+    initial_value: '40'
+
+  - id: small_timer_set_duration
+    type: int
+    restore_value: yes
+    initial_value: '5'
+
+  - id: current_total_duration
+    type: int
+    restore_value: no
+    initial_value: '40'
+
+  - id: large_timer_color_value
+    type: int
+    restore_value: yes
+    initial_value: '0x007F00' # Initial green color (RGB)
+
+  - id: small_timer_color_value
+    type: int
+    restore_value: yes
+    initial_value: '0x7F0000' # Initial red color (RGB)
