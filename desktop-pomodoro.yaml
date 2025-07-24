@@ -36,7 +36,7 @@ light:
           name: "Rainbow"
       - addressable_lambda: 
           name: "Timer effect"
-          update_interval: 16ms
+          update_interval: 1s
           lambda: |-
             Color color_to_use;
             if (id(timer_mode) == 0) { // Large timer mode
@@ -95,15 +95,27 @@ binary_sensor:
         - script.execute: start_small_timer_script
 
 script:
+  - id: update_display_script
+    then:
+      - lambda: |-
+          id(tm1637_display).printf("%d", id(timer));
+          id(tm1637_display).display();
+
+  - id: set_timer_effect_script
+    then:
+      - lambda: |-
+          auto call = id(led_strip).turn_on();
+          call.set_effect("Timer effect");
+          call.perform();
+
   - id: start_large_timer_script
     then:
       - lambda: |-
           id(timer) = id(large_timer_set_duration);
           id(timer_mode) = 0; // Green
           id(current_total_duration) = id(large_timer_set_duration);
-          auto call = id(led_strip).turn_on();
-          call.set_effect("Timer effect");
-          call.perform();
+      - script.execute: set_timer_effect_script
+      - script.execute: update_display_script
       - logger.log: 
           format: "Large timer started with duration: %d minutes"
           args: [ 'id(large_timer_set_duration)' ]
@@ -114,9 +126,8 @@ script:
           id(timer) = id(small_timer_set_duration);
           id(timer_mode) = 1; // Red
           id(current_total_duration) = id(small_timer_set_duration);
-          auto call = id(led_strip).turn_on();
-          call.set_effect("Timer effect");
-          call.perform();
+      - script.execute: set_timer_effect_script
+      - script.execute: update_display_script
       - logger.log: 
           format: "Small timer started with duration: %d minutes"
           args: [ 'id(small_timer_set_duration)' ]
@@ -124,6 +135,7 @@ script:
   - id: decrement_led_script
     then:
       - lambda: |-
+          auto call = id(led_strip).turn_on();
           if (id(timer) > 0) {
             id(timer) -= 1;
             if (id(current_total_duration) > 0) {
@@ -131,11 +143,11 @@ script:
             } else {
               id(led_index) = 0; // Avoid division by zero
             }
-            auto call = id(led_strip).turn_on();
+            
             call.set_effect("Timer effect");
             call.perform();
+            id(update_display_script)->execute();
           } else {
-            auto call = id(led_strip).turn_on();
             call.set_effect("Rainbow");
             call.perform();
             id(blink_display)->execute();
