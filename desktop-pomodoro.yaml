@@ -162,7 +162,7 @@ binary_sensor:
       then:
         - lambda: |-
             id(fsm_state) = 2;
-            id(timer) = id(small_timer_set_duration);
+            id(timer) = id(small_timer_set_duration) + 1;
             id(current_total_duration) = id(small_timer_set_duration);
             id(start_time_millis) = id(sntp_time).now().timestamp;
         - script.execute: interval_timer
@@ -248,7 +248,7 @@ script:
           }   
           
       - logger.log: 
-          format: "LED index decremented: led - %d, timer - %d, fsm_state - %d"
+          format: "LED effect updated: led - %d, timer - %d, fsm_state - %d"
           args: [ 'id(led_index)', 'id(timer)', 'id(fsm_state)' ]
   # Display scripts
   - id: blink_display
