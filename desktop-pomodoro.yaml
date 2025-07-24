@@ -5,7 +5,7 @@ esphome:
   name_add_mac_suffix: false
 
   on_boot:
-    - priority: 800 
+    - priority: 600.0 
       then:
         - script.execute: init_script
       
@@ -34,6 +34,11 @@ wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
 
+time:
+  - platform: sntp
+    id: sntp_time
+
+
 globals:
   - id: timer
     type: int
@@ -42,7 +47,7 @@ globals:
 
   - id: fsm_state
     type: int
-    restore_value: no
+    restore_value: yes
     initial_value: '0'  # 0: IDLE, 1: LARGE_TIMER, 2: SMALL_TIMER, 3: DONE
 
   - id: led_index
@@ -62,7 +67,7 @@ globals:
 
   - id: current_total_duration
     type: int
-    restore_value: no
+    restore_value: yes
     initial_value: '40'
 
   - id: display_enabled
@@ -74,6 +79,11 @@ globals:
     type: bool
     restore_value: yes
     initial_value: 'true'
+
+  - id: start_time_millis
+    type: int
+    restore_value: yes
+    initial_value: '0'
 
 light:
   - platform: esp32_rmt_led_strip
@@ -127,10 +137,10 @@ binary_sensor:
       then:
         - lambda: |-
             id(fsm_state) = 1;
-            id(timer) = id(large_timer_set_duration);
+            id(timer) = id(large_timer_set_duration) + 1;
             id(current_total_duration) = id(large_timer_set_duration);
-        - script.execute: update_effect
-        - script.execute: update_display
+            id(start_time_millis) =id(sntp_time).now().timestamp;
+        - script.execute: interval_timer
     on_multi_click: 
       - timing: [ ON for at least 1s ]
         then:
@@ -154,8 +164,8 @@ binary_sensor:
             id(fsm_state) = 2;
             id(timer) = id(small_timer_set_duration);
             id(current_total_duration) = id(small_timer_set_duration);
-        - script.execute: update_effect
-        - script.execute: update_display
+            id(start_time_millis) = id(sntp_time).now().timestamp;
+        - script.execute: interval_timer
     on_multi_click:
       - timing: [ ON for at least 1000ms ]
         then:
@@ -168,20 +178,39 @@ script:
   - id: init_script
     then:
       - lambda: |-
-          id(led_strip).set_brightness(0.5);
-
-  - id: decrement_timer
-    then:
-      - lambda: |-
-          id(timer) -= 1;
-          if (id(timer) <= 0) {
-            id(fsm_state) = 3;
+          while (!id(sntp_time).now().is_valid()) {
+            delay(1000);            
           }
+          auto timestamp = id(sntp_time).now().timestamp; 
+          
+          auto secs_diff = timestamp - id(start_time_millis);
+
+          if ((id(fsm_state) == 1 || id(fsm_state) == 2) && secs_diff > 0) {
+            auto minutes_diff = secs_diff / 60;
+            auto seconds_diff = (minutes_diff + 1)* 60 - secs_diff;
+            id(timer) = id(current_total_duration) - minutes_diff;
+            
+            id(full_update).execute();
+            
+            delay(seconds_diff * 1000);
+            id(interval_timer).execute();
+            return;
+          }
+          
+          id(timer) = 0;
+          
+          id(fsm_state) = 3;
+          ESP_LOGD("init_script", "new fsm_state: %d", id(fsm_state));
+          id(full_update).execute();
+
+
+  - id: full_update
+    then:
       - script.execute: calculate_light_led
       - script.execute: update_effect
       - script.execute: update_display
       - logger.log: 
-          format: "LED index decremented: led - %d, timer - %d, fsm_state - %d"
+          format: "Update display: led - %d, timer - %d, fsm_state - %d"
           args: [ 'id(led_index)', 'id(timer)', 'id(fsm_state)' ]
   
 
@@ -203,9 +232,7 @@ script:
           } else {
             id(led_index) = 0;
           }
-      - logger.log: 
-          format: "LED index decremented: led - %d, timer - %d"
-          args: [ 'id(led_index)', 'id(timer)' ]
+
 
   - id: update_effect
     then:
@@ -221,9 +248,8 @@ script:
           }   
           
       - logger.log: 
-          format: "LED index updated: led - %d, timer - %d"
-          args: [ 'id(led_index)', 'id(timer)' ]
-
+          format: "LED index decremented: led - %d, timer - %d, fsm_state - %d"
+          args: [ 'id(led_index)', 'id(timer)', 'id(fsm_state)' ]
   # Display scripts
   - id: blink_display
     mode: restart
@@ -280,7 +306,12 @@ script:
           condition:
             lambda: 'return id(timer) > 0;'
           then:
-            - script.execute: decrement_timer
+            - lambda: |-
+                id(timer) -= 1;
+                if (id(timer) <= 0) {
+                  id(fsm_state) = 3;
+                }
+            - script.execute: full_update
             - delay: 1min
 
 number:
@@ -300,11 +331,11 @@ number:
           id(large_timer_duration).publish_state(x);
 
           if (id(fsm_state) == 1) { // Если большой таймер активен
-            id(timer) = x; // Обновить текущий таймер новой длительностью
+            id(timer) = x + 1; // Обновить текущий таймер новой длительностью
             id(current_total_duration) = x; // Обновить общую длительность
-            id(calculate_light_led).execute(); // Обновить светодиоды
-            id(update_display).execute(); // Обновить дисплей
+            id(interval_timer).execute();
           }
+
 
   - platform: template
     name: "Small Timer Duration"
@@ -322,11 +353,11 @@ number:
           id(small_timer_duration).publish_state(x);
 
           if (id(fsm_state) == 2) { // Если малый таймер активен
-            id(timer) = x; // Обновить текущий таймер новой длительностью
+            id(timer) = x + 1; // Обновить текущий таймер новой длительностью
             id(current_total_duration) = x; // Обновить общую длительность
-            id(calculate_light_led).execute(); // Обновить светодиоды
-            id(update_display).execute(); // Обновить дисплей
+            id(interval_timer).execute();
           }
+
 
 sensor:
   - platform: uptime
@@ -341,11 +372,11 @@ button:
       then:
         - lambda: |-
             id(fsm_state) = 1;
-            id(timer) = id(large_timer_set_duration);
+            id(timer) = id(large_timer_set_duration) + 1;
             id(current_total_duration) = id(large_timer_set_duration);
-        - script.execute: calculate_light_led
-        - script.execute: update_effect
-        - script.execute: update_display
+            id(start_time_millis) = id(sntp_time).now().timestamp;
+        - script.stop: blink_display
+        - script.execute: interval_timer
 
   - platform: template
     name: "Start Small Timer"
@@ -353,8 +384,8 @@ button:
       then:
         - lambda: |-
             id(fsm_state) = 2;
-            id(timer) = id(small_timer_set_duration);
+            id(timer) = id(small_timer_set_duration) + 1;
             id(current_total_duration) = id(small_timer_set_duration);
-        - script.execute: calculate_light_led
-        - script.execute: update_effect
-        - script.execute: update_display
+            id(start_time_millis) = id(sntp_time).now().timestamp;
+        - script.stop: blink_display
+        - script.execute: interval_timer
