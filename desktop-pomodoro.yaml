@@ -137,9 +137,9 @@ binary_sensor:
       then:
         - lambda: |-
             id(fsm_state) = 1;
-            id(timer) = id(large_timer_set_duration) + 1;
+            id(timer) = id(large_timer_set_duration);
             id(current_total_duration) = id(large_timer_set_duration);
-            id(start_time_millis) =id(sntp_time).now().timestamp;
+            id(start_time_millis) = id(sntp_time).now().timestamp;
         - script.execute: interval_timer
     on_multi_click: 
       - timing: [ ON for at least 1s ]
@@ -162,7 +162,7 @@ binary_sensor:
       then:
         - lambda: |-
             id(fsm_state) = 2;
-            id(timer) = id(small_timer_set_duration) + 1;
+            id(timer) = id(small_timer_set_duration);
             id(current_total_duration) = id(small_timer_set_duration);
             id(start_time_millis) = id(sntp_time).now().timestamp;
         - script.execute: interval_timer
@@ -177,17 +177,18 @@ binary_sensor:
 script:
   - id: init_script
     then:
+      - wait_until:
+          condition:
+            lambda: 'return id(sntp_time).now().is_valid();'
+          timeout: 1s
       - lambda: |-
-          while (!id(sntp_time).now().is_valid()) {
-            delay(1000);            
-          }
           auto timestamp = id(sntp_time).now().timestamp; 
           
           auto secs_diff = timestamp - id(start_time_millis);
 
           if ((id(fsm_state) == 1 || id(fsm_state) == 2) && secs_diff > 0) {
             auto minutes_diff = secs_diff / 60;
-            auto seconds_diff = (minutes_diff + 1)* 60 - secs_diff;
+            auto seconds_diff = (minutes_diff + 1) * 60 - secs_diff;
             id(timer) = id(current_total_duration) - minutes_diff;
             
             id(full_update).execute();
@@ -198,9 +199,8 @@ script:
           }
           
           id(timer) = 0;
-          
-          id(fsm_state) = 3;
-          ESP_LOGD("init_script", "new fsm_state: %d", id(fsm_state));
+          id(fsm_state) = 0;
+
           id(full_update).execute();
 
 
@@ -228,7 +228,7 @@ script:
     then:
       - lambda: |-
           if (id(fsm_state) == 1 || id(fsm_state) == 2) {
-            id(led_index) = (id(timer) * 8) / id(current_total_duration);
+            id(led_index) = (id(timer) * 8 + id(current_total_duration) - 1) / id(current_total_duration);
           } else {
             id(led_index) = 0;
           }
@@ -236,20 +236,31 @@ script:
 
   - id: update_effect
     then:
-      - lambda: |-
-          if (!id(led_strip_enabled) || id(fsm_state) == 0) {
-            id(led_strip).turn_off().perform();
-            return;
-          } 
-          if (id(fsm_state) == 1 || id(fsm_state) == 2) {
-            id(led_strip).turn_on().set_effect("Timer effect").perform();  
-          } else if (id(fsm_state) == 3) {
-            id(led_strip).turn_on().set_effect("Rainbow").perform();
-          }   
+      - if:
+          all:
+            - lambda: 'return id(led_strip_enabled);'
+            - lambda: 'return id(fsm_state) > 0;'
+          then:
+            - if:
+                any:
+                  - lambda: 'return id(fsm_state) == 1;'
+                  - lambda: 'return id(fsm_state) == 2;'
+                then:
+                  - light.turn_on: 
+                      id: led_strip
+                      effect: Timer effect
+
+                else:
+                  - light.turn_on: 
+                      id: led_strip
+                      effect: Rainbow
+          else:
+            - light.turn_off: led_strip
           
       - logger.log: 
           format: "LED effect updated: led - %d, timer - %d, fsm_state - %d"
           args: [ 'id(led_index)', 'id(timer)', 'id(fsm_state)' ]
+          
   # Display scripts
   - id: blink_display
     mode: restart
@@ -286,10 +297,10 @@ script:
       - lambda: |-
           if (id(display_enabled)) {
             if (id(fsm_state) == 1) {  // Large timer
-              id(tm1637_display).printf(0, "L %2d", id(timer));
+              id(tm1637_display).printf(0, "L%3d", id(timer));
               id(tm1637_display).display();
             } else if (id(fsm_state) == 2) {  // Small timer
-              id(tm1637_display).printf(0, "S %2d", id(timer));
+              id(tm1637_display).printf(0, "S%3d", id(timer));
               id(tm1637_display).display();
             } else if (id(fsm_state) == 3) {  // Done
               id(blink_display).execute();
@@ -302,17 +313,22 @@ script:
   - id: interval_timer
     mode: restart
     then:
+      - script.stop: blink_display
       - while:
           condition:
             lambda: 'return id(timer) > 0;'
           then:
-            - lambda: |-
-                id(timer) -= 1;
-                if (id(timer) <= 0) {
-                  id(fsm_state) = 3;
-                }
             - script.execute: full_update
             - delay: 1min
+            - lambda: |-
+                id(timer) -= 1;
+            - logger.log: 
+                format: "Timer updated: %d"
+                args: [ id(timer) ]
+      - lambda: |-
+          id(fsm_state) = 3;
+      - logger.log: "Timer finished, fsm_state = 3"
+      - script.execute: full_update
 
 number:
   - platform: template
@@ -331,7 +347,7 @@ number:
           id(large_timer_duration).publish_state(x);
 
           if (id(fsm_state) == 1) { // Если большой таймер активен
-            id(timer) = x + 1; // Обновить текущий таймер новой длительностью
+            id(timer) = x; // Обновить текущий таймер новой длительностью
             id(current_total_duration) = x; // Обновить общую длительность
             id(interval_timer).execute();
           }
@@ -353,7 +369,7 @@ number:
           id(small_timer_duration).publish_state(x);
 
           if (id(fsm_state) == 2) { // Если малый таймер активен
-            id(timer) = x + 1; // Обновить текущий таймер новой длительностью
+            id(timer) = x; // Обновить текущий таймер новой длительностью
             id(current_total_duration) = x; // Обновить общую длительность
             id(interval_timer).execute();
           }
@@ -372,10 +388,9 @@ button:
       then:
         - lambda: |-
             id(fsm_state) = 1;
-            id(timer) = id(large_timer_set_duration) + 1;
+            id(timer) = id(large_timer_set_duration);
             id(current_total_duration) = id(large_timer_set_duration);
             id(start_time_millis) = id(sntp_time).now().timestamp;
-        - script.stop: blink_display
         - script.execute: interval_timer
 
   - platform: template
@@ -384,8 +399,7 @@ button:
       then:
         - lambda: |-
             id(fsm_state) = 2;
-            id(timer) = id(small_timer_set_duration) + 1;
+            id(timer) = id(small_timer_set_duration);
             id(current_total_duration) = id(small_timer_set_duration);
             id(start_time_millis) = id(sntp_time).now().timestamp;
-        - script.stop: blink_display
         - script.execute: interval_timer
