@@ -21,7 +21,7 @@ esp32:
     type: esp-idf
 
 logger:
-  level: debug
+  level: info
 
 api:
   encryption:
@@ -33,6 +33,9 @@ ota:
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
+  power_save_mode: HIGH
+  fast_connect: True
+  manual_ip: !secret desktop_pomodoro
 
 time:
   - platform: sntp
@@ -85,6 +88,11 @@ globals:
     restore_value: yes
     initial_value: '0'
 
+  - id: seconds_remaining
+    type: int
+    restore_value: no
+    initial_value: '0'
+
 light:
   - platform: esp32_rmt_led_strip
     id: led_strip
@@ -93,6 +101,7 @@ light:
     num_leds: 8
     rgb_order: GRB
     name: "LED Strip"
+
     effects: 
       - addressable_rainbow:
           name: "Rainbow"
@@ -181,28 +190,43 @@ script:
           condition:
             lambda: 'return id(sntp_time).now().is_valid();'
           timeout: 1s
-      - lambda: |-
-          auto timestamp = id(sntp_time).now().timestamp; 
-          
-          auto secs_diff = timestamp - id(start_time_millis);
+      - if:
+          any:
+            - lambda: 'return id(fsm_state) == 1;'
+            - lambda: 'return id(fsm_state) == 2;'
+          then:
+            - lambda: |-
+                auto timestamp = id(sntp_time).now().timestamp; 
+                auto secs_past = timestamp - id(start_time_millis);
+                auto minutes_past = secs_past / 60;
+                
 
-          if ((id(fsm_state) == 1 || id(fsm_state) == 2) && secs_diff > 0) {
-            auto minutes_diff = secs_diff / 60;
-            auto seconds_diff = (minutes_diff + 1) * 60 - secs_diff;
-            id(timer) = id(current_total_duration) - minutes_diff;
-            
-            id(full_update).execute();
-            
-            delay(seconds_diff * 1000);
-            id(interval_timer).execute();
-            return;
-          }
-          
-          id(timer) = 0;
-          id(fsm_state) = 0;
+                auto new_timer = id(current_total_duration) - minutes_past;
+                if (new_timer <= 0) {
+                  id(timer) = 0;
+                  id(fsm_state) = 3;
+                } else {
+                  id(timer) = new_timer;
 
-          id(full_update).execute();
+                  auto seconds_left = (minutes_past + 1) * 60 - secs_past;
+                  id(seconds_remaining) = seconds_left;
+                }
+            - script.execute: start_timer
+          else:
+            - script.execute: interval_timer
 
+  - id: start_timer
+    then:
+      - if:
+          all:
+            - lambda: 'return id(timer) > 0;'
+            - lambda: 'return id(seconds_remaining) > 0;'
+          then:
+            - script.execute: full_update
+            - delay: !lambda "return id(seconds_remaining) * 1000;"
+            - lambda: |-
+                id(timer) -= 1;
+      - script.execute: interval_timer
 
   - id: full_update
     then:
@@ -270,10 +294,6 @@ script:
             lambda: 'return id(fsm_state) == 3;'
           then:
             - lambda: |-
-                id(tm1637_display).printf("____");
-                id(tm1637_display).display();
-            - delay: 200ms
-            - lambda: |-
                 id(tm1637_display).printf("----");
                 id(tm1637_display).display();
             - delay: 200ms
@@ -289,26 +309,40 @@ script:
                 id(tm1637_display).printf("____");
                 id(tm1637_display).display();
             - delay: 200ms
-            - logger.log: "Display blinked"
-  
+            
 
   - id: update_display
     then:
       - lambda: |-
-          if (id(display_enabled)) {
-            if (id(fsm_state) == 1) {  // Large timer
-              id(tm1637_display).printf(0, "L%3d", id(timer));
-              id(tm1637_display).display();
-            } else if (id(fsm_state) == 2) {  // Small timer
-              id(tm1637_display).printf(0, "S%3d", id(timer));
-              id(tm1637_display).display();
-            } else if (id(fsm_state) == 3) {  // Done
-              id(blink_display).execute();
-            }
-          } else {
+          if (!id(display_enabled)) {
             id(tm1637_display).printf(0, "    ");
             id(tm1637_display).display();
+          } 
+          switch (id(fsm_state)) {
+            case 0:
+              id(tm1637_display).printf(0, "    ");
+              id(tm1637_display).display();
+              break;
+            case 1:
+              id(tm1637_display).printf(0, "L%3d", id(timer));
+              id(tm1637_display).display();
+              break;
+            case 2:
+              id(tm1637_display).printf(0, "S%3d", id(timer));
+              id(tm1637_display).display();
+              break;
+            case 3:
+              id(blink_display).execute();
+              break;
+            default:
+              id(tm1637_display).printf(0, "    ");
+              id(tm1637_display).display();
+              break;
           }
+      - logger.log: 
+          format: "Display updated: led - %d, timer - %d, fsm_state - %d"
+          args: [ 'id(led_index)', 'id(timer)', 'id(fsm_state)' ]
+          
 
   - id: interval_timer
     mode: restart
@@ -403,3 +437,6 @@ button:
             id(current_total_duration) = id(small_timer_set_duration);
             id(start_time_millis) = id(sntp_time).now().timestamp;
         - script.execute: interval_timer
+  
+  - platform: restart
+    name: "Timer Restart"
