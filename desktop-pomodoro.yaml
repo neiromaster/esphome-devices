@@ -434,6 +434,10 @@ sensor:
     name: "Uptime Sensor"
     id: uptime_sensor
 
+  - platform: wifi_signal
+    name: "WiFi Signal"
+    update_interval: 30s
+
 
 button:
   - platform: template
