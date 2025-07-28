@@ -33,7 +33,7 @@ ota:
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
-  power_save_mode: HIGH
+  # power_save_mode: HIGH
   fast_connect: True
   manual_ip: !secret desktop_pomodoro
 
@@ -210,19 +210,20 @@ script:
           then:
             - lambda: |-
                 auto timestamp = id(sntp_time).now().timestamp; 
-                auto secs_past = timestamp - id(start_time_millis);
-                auto minutes_past = secs_past / 60;
-                
+                auto elapsed_seconds = timestamp - id(start_time_millis);
+                auto total_duration_seconds = id(current_total_duration) * 60;
+                auto remaining_seconds = total_duration_seconds - elapsed_seconds;
 
-                auto new_timer = id(current_total_duration) - minutes_past;
-                if (new_timer <= 0) {
+                if (remaining_seconds <= 0) {
                   id(timer) = 0;
                   id(fsm_state) = id(FSM_DONE);
+                  id(seconds_remaining) = 0; // Ensure seconds_remaining is also 0
                 } else {
-                  id(timer) = new_timer;
-
-                  auto seconds_left = (minutes_past + 1) * 60 - secs_past;
-                  id(seconds_remaining) = seconds_left;
+                  id(timer) = remaining_seconds / 60;
+                  if (remaining_seconds % 60 != 0) {
+                    id(timer)++;
+                  }
+                  id(seconds_remaining) = remaining_seconds % 60;
                 }
             - script.execute: start_timer
           else:
