@@ -4,5 +4,3 @@
 /.esphome/
 /secrets.yaml
 .env
-.DS_Store
-/.vscode/
