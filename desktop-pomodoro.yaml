@@ -157,12 +157,10 @@ binary_sensor:
       - delayed_off: 10ms
     on_press:
       then:
-        - lambda: |-
-            id(fsm_state) = id(FSM_LARGE_TIMER);
-            id(timer) = id(large_timer_set_duration);
-            id(current_total_duration) = id(large_timer_set_duration);
-            id(start_time_millis) = id(sntp_time).now().timestamp;
-        - script.execute: interval_timer
+        - script.execute:
+            id: start_timer_script
+            timer_fsm_state: id(FSM_LARGE_TIMER)
+            timer_duration_id: id(large_timer_set_duration)
     on_multi_click: 
       - timing: [ ON for at least 1s ]
         then:
@@ -182,12 +180,10 @@ binary_sensor:
       - delayed_off: 10ms
     on_press:
       then:
-        - lambda: |-
-            id(fsm_state) = id(FSM_SMALL_TIMER);
-            id(timer) = id(small_timer_set_duration);
-            id(current_total_duration) = id(small_timer_set_duration);
-            id(start_time_millis) = id(sntp_time).now().timestamp;
-        - script.execute: interval_timer
+        - script.execute:
+            id: start_timer_script
+            timer_fsm_state: id(FSM_SMALL_TIMER)
+            timer_duration_id: id(small_timer_set_duration)
     on_multi_click:
       - timing: [ ON for at least 1000ms ]
         then:
@@ -347,6 +343,18 @@ script:
           args: [ 'id(led_index)', 'id(timer)', 'id(fsm_state)' ]
           
 
+  - id: start_timer_script
+    parameters:
+      timer_fsm_state: int
+      timer_duration_id: int
+    then:
+      - lambda: |-
+          id(fsm_state) = timer_fsm_state;
+          id(timer) = timer_duration_id;
+          id(current_total_duration) = timer_duration_id;
+          id(start_time_millis) = id(sntp_time).now().timestamp;
+      - script.execute: interval_timer
+
   - id: interval_timer
     mode: restart
     then:
@@ -432,23 +440,19 @@ button:
     name: "Start Large Timer"
     on_press:
       then:
-        - lambda: |-
-            id(fsm_state) = id(FSM_LARGE_TIMER);
-            id(timer) = id(large_timer_set_duration);
-            id(current_total_duration) = id(large_timer_set_duration);
-            id(start_time_millis) = id(sntp_time).now().timestamp;
-        - script.execute: interval_timer
+        - script.execute:
+            id: start_timer_script
+            timer_fsm_state: id(FSM_LARGE_TIMER)
+            timer_duration_id: id(large_timer_set_duration)
 
   - platform: template
     name: "Start Small Timer"
     on_press:
       then:
-        - lambda: |-
-            id(fsm_state) = id(FSM_SMALL_TIMER);
-            id(timer) = id(small_timer_set_duration);
-            id(current_total_duration) = id(small_timer_set_duration);
-            id(start_time_millis) = id(sntp_time).now().timestamp;
-        - script.execute: interval_timer
+        - script.execute:
+            id: start_timer_script
+            timer_fsm_state: id(FSM_SMALL_TIMER)
+            timer_duration_id: id(small_timer_set_duration)
   
   - platform: restart
     name: "Timer Restart"
