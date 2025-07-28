@@ -48,6 +48,19 @@ globals:
     restore_value: no
     initial_value: '40'
 
+  - id: FSM_IDLE
+    type: int
+    initial_value: '0'
+  - id: FSM_LARGE_TIMER
+    type: int
+    initial_value: '1'
+  - id: FSM_SMALL_TIMER
+    type: int
+    initial_value: '2'
+  - id: FSM_DONE
+    type: int
+    initial_value: '3'
+
   - id: fsm_state
     type: int
     restore_value: yes
@@ -110,9 +123,9 @@ light:
           update_interval: 1s
           lambda: |-
             Color color;
-            if (id(fsm_state) == 1) { // Large timer mode
+            if (id(fsm_state) == id(FSM_LARGE_TIMER)) { // Large timer mode
               color = Color(0x00FF00); // Fixed Green
-            } else if (id(fsm_state) == 2) { // Small timer mode
+            } else if (id(fsm_state) == id(FSM_SMALL_TIMER)) { // Small timer mode
               color = Color(0xFF0000); // Fixed Red
             } else {
               color = Color::BLACK;
@@ -145,7 +158,7 @@ binary_sensor:
     on_press:
       then:
         - lambda: |-
-            id(fsm_state) = 1;
+            id(fsm_state) = id(FSM_LARGE_TIMER);
             id(timer) = id(large_timer_set_duration);
             id(current_total_duration) = id(large_timer_set_duration);
             id(start_time_millis) = id(sntp_time).now().timestamp;
@@ -170,7 +183,7 @@ binary_sensor:
     on_press:
       then:
         - lambda: |-
-            id(fsm_state) = 2;
+            id(fsm_state) = id(FSM_SMALL_TIMER);
             id(timer) = id(small_timer_set_duration);
             id(current_total_duration) = id(small_timer_set_duration);
             id(start_time_millis) = id(sntp_time).now().timestamp;
@@ -192,8 +205,8 @@ script:
           timeout: 1s
       - if:
           any:
-            - lambda: 'return id(fsm_state) == 1;'
-            - lambda: 'return id(fsm_state) == 2;'
+            - lambda: 'return id(fsm_state) == id(FSM_LARGE_TIMER);'
+            - lambda: 'return id(fsm_state) == id(FSM_SMALL_TIMER);'
           then:
             - lambda: |-
                 auto timestamp = id(sntp_time).now().timestamp; 
@@ -204,7 +217,7 @@ script:
                 auto new_timer = id(current_total_duration) - minutes_past;
                 if (new_timer <= 0) {
                   id(timer) = 0;
-                  id(fsm_state) = 3;
+                  id(fsm_state) = id(FSM_DONE);
                 } else {
                   id(timer) = new_timer;
 
@@ -251,7 +264,7 @@ script:
   - id: calculate_light_led
     then:
       - lambda: |-
-          if (id(fsm_state) == 1 || id(fsm_state) == 2) {
+          if (id(fsm_state) == id(FSM_LARGE_TIMER) || id(fsm_state) == id(FSM_SMALL_TIMER)) {
             id(led_index) = (id(timer) * 8 + id(current_total_duration) - 1) / id(current_total_duration);
           } else {
             id(led_index) = 0;
@@ -263,12 +276,12 @@ script:
       - if:
           all:
             - lambda: 'return id(led_strip_enabled);'
-            - lambda: 'return id(fsm_state) > 0;'
+            - lambda: 'return id(fsm_state) != id(FSM_IDLE);'
           then:
             - if:
                 any:
-                  - lambda: 'return id(fsm_state) == 1;'
-                  - lambda: 'return id(fsm_state) == 2;'
+                  - lambda: 'return id(fsm_state) == id(FSM_LARGE_TIMER);'
+                  - lambda: 'return id(fsm_state) == id(FSM_SMALL_TIMER);'
                 then:
                   - light.turn_on: 
                       id: led_strip
@@ -291,7 +304,7 @@ script:
     then:
       - while:
           condition:
-            lambda: 'return id(fsm_state) == 3;'
+            lambda: 'return id(fsm_state) == id(FSM_DONE);'
           then:
             - lambda: |-
                 id(tm1637_display).printf("----");
@@ -360,7 +373,7 @@ script:
                 format: "Timer updated: %d"
                 args: [ id(timer) ]
       - lambda: |-
-          id(fsm_state) = 3;
+          id(fsm_state) = id(FSM_DONE);
       - logger.log: "Timer finished, fsm_state = 3"
       - script.execute: full_update
 
@@ -380,7 +393,7 @@ number:
           id(large_timer_set_duration) = x;
           id(large_timer_duration).publish_state(x);
 
-          if (id(fsm_state) == 1) { // Если большой таймер активен
+          if (id(fsm_state) == id(FSM_LARGE_TIMER)) { // Если большой таймер активен
             id(timer) = x; // Обновить текущий таймер новой длительностью
             id(current_total_duration) = x; // Обновить общую длительность
             id(interval_timer).execute();
@@ -402,7 +415,7 @@ number:
           id(small_timer_set_duration) = x;
           id(small_timer_duration).publish_state(x);
 
-          if (id(fsm_state) == 2) { // Если малый таймер активен
+          if (id(fsm_state) == id(FSM_SMALL_TIMER)) { // Если малый таймер активен
             id(timer) = x; // Обновить текущий таймер новой длительностью
             id(current_total_duration) = x; // Обновить общую длительность
             id(interval_timer).execute();
@@ -421,7 +434,7 @@ button:
     on_press:
       then:
         - lambda: |-
-            id(fsm_state) = 1;
+            id(fsm_state) = id(FSM_LARGE_TIMER);
             id(timer) = id(large_timer_set_duration);
             id(current_total_duration) = id(large_timer_set_duration);
             id(start_time_millis) = id(sntp_time).now().timestamp;
@@ -432,7 +445,7 @@ button:
     on_press:
       then:
         - lambda: |-
-            id(fsm_state) = 2;
+            id(fsm_state) = id(FSM_SMALL_TIMER);
             id(timer) = id(small_timer_set_duration);
             id(current_total_duration) = id(small_timer_set_duration);
             id(start_time_millis) = id(sntp_time).now().timestamp;
