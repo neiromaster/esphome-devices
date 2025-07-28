@@ -225,22 +225,11 @@ script:
                   }
                   id(seconds_remaining) = remaining_seconds % 60;
                 }
-            - script.execute: start_timer
+            - script.execute: interval_timer
           else:
             - script.execute: interval_timer
 
-  - id: start_timer
-    then:
-      - if:
-          all:
-            - lambda: 'return id(timer) > 0;'
-            - lambda: 'return id(seconds_remaining) > 0;'
-          then:
-            - script.execute: full_update
-            - delay: !lambda "return id(seconds_remaining) * 1000;"
-            - lambda: |-
-                id(timer) -= 1;
-      - script.execute: interval_timer
+  
 
   - id: full_update
     then:
@@ -362,6 +351,15 @@ script:
     mode: restart
     then:
       - script.stop: blink_display
+      - if:
+          all:
+            - lambda: 'return id(timer) > 0;'
+            - lambda: 'return id(seconds_remaining) > 0;'
+          then:
+            - script.execute: full_update
+            - delay: !lambda "return id(seconds_remaining) * 1000;"
+            - lambda: |-
+                id(timer) -= 1;
       - while:
           condition:
             lambda: 'return id(timer) > 0;'
