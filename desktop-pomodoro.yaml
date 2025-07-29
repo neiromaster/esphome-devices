@@ -448,6 +448,20 @@ sensor:
     name: "WiFi Signal"
     update_interval: 30s
 
+  - platform: adc
+    pin: GPIO34
+    name: "Battery Voltage"
+    unit_of_measurement: "V"
+    icon: "mdi:battery"
+    attenuation: auto # Full range (0-3.3V)
+    update_interval: 60s # Check every minute
+    filters:
+      - calibrate_linear:
+          # Если ADC считывает 0В, напряжение батареи 0В
+          - 0 -> 0
+          # Если ADC считывает 2.1В (что соответствует 4.2В батареи с делителем 10k/10k), напряжение батареи 4.2В
+          - 2.1 -> 4.2
+
 
 button:
   - platform: template
