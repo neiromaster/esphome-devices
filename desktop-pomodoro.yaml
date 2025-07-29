@@ -317,7 +317,9 @@ script:
             
 
   - id: update_display
+    mode: restart
     then:
+      - script.stop: blink_display
       - lambda: |-
           if (!id(display_enabled)) {
             id(tm1637_display).printf(0, "    ");
@@ -377,6 +379,20 @@ script:
           id(fsm_state) = id(FSM_DONE);
       - logger.log: "Timer finished, fsm_state = 3"
       - script.execute: full_update
+      - script.execute: idle_timeout_script
+
+  - id: idle_timeout_script
+    mode: restart
+    then:
+      - delay: 5min
+      - if:
+          condition:
+            lambda: 'return id(fsm_state) == id(FSM_DONE);'
+          then:
+            - lambda: |-
+                id(fsm_state) = id(FSM_IDLE);
+            - script.execute: full_update
+            - logger.log: "Inactivity timeout: transitioned to FSM_IDLE"
 
 number:
   - platform: template
