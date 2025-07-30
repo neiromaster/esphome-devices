@@ -11,6 +11,8 @@ esphome:
       
     - priority: -100.0
       then:
+        - lambda: |-
+            esp_sleep_enable_ext1_wakeup(((1ULL << 32) | (1ULL << 33)), ESP_EXT1_WAKEUP_ANY_HIGH);
         - component.update: small_timer_duration
         - component.update: large_timer_duration
   
@@ -20,6 +22,9 @@ esp32:
   framework:
     type: esp-idf
 
+deep_sleep:
+  id: deep_sleep_component
+  
 logger:
   level: debug
   baud_rate: 0
@@ -34,7 +39,7 @@ ota:
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
-  # power_save_mode: HIGH
+  power_save_mode: HIGH
   output_power: 8.5dB
   fast_connect: True
   manual_ip: !secret desktop_pomodoro
@@ -48,7 +53,7 @@ globals:
   - id: timer
     type: int
     restore_value: no
-    initial_value: '40'
+    initial_value: '0'
 
   - id: FSM_IDLE
     type: int
@@ -125,10 +130,10 @@ light:
           update_interval: 1s
           lambda: |-
             Color color;
-            if (id(fsm_state) == id(FSM_LARGE_TIMER)) { // Large timer mode
-              color = Color(0x00FF00); // Fixed Green
-            } else if (id(fsm_state) == id(FSM_SMALL_TIMER)) { // Small timer mode
-              color = Color(0xFF0000); // Fixed Red
+            if (id(fsm_state) == id(FSM_LARGE_TIMER)) {
+              color = Color(0x00FF00);
+            } else if (id(fsm_state) == id(FSM_SMALL_TIMER)) {
+              color = Color(0xFF0000);
             } else {
               color = Color::BLACK;
             }
@@ -149,9 +154,8 @@ display:
 binary_sensor:
   - platform: gpio
     pin:
-      number: GPIO17
-      mode: INPUT_PULLUP
-      inverted: true
+      number: GPIO32
+      mode: INPUT_PULLDOWN
     name: "Start Large Timer Button"
     id: start_large_timer_button
     filters:
@@ -174,9 +178,8 @@ binary_sensor:
 
   - platform: gpio
     pin:
-      number: GPIO18
-      mode: INPUT_PULLUP
-      inverted: true
+      number: GPIO33
+      mode: INPUT_PULLDOWN
     name: "Start Small Timer Button"
     id: start_small_timer_button
     filters:
@@ -219,7 +222,7 @@ script:
                 if (remaining_seconds <= 0) {
                   id(timer) = 0;
                   id(fsm_state) = id(FSM_DONE);
-                  id(seconds_remaining) = 0; // Ensure seconds_remaining is also 0
+                  id(seconds_remaining) = 0;
                 } else {
                   id(timer) = remaining_seconds / 60;
                   if (remaining_seconds % 60 != 0) {
@@ -229,6 +232,7 @@ script:
                 }
             - script.execute: interval_timer
           else:
+            - lambda: id(fsm_state) = id(FSM_DONE);
             - script.execute: interval_timer
 
   
@@ -393,6 +397,7 @@ script:
                 id(fsm_state) = id(FSM_IDLE);
             - script.execute: full_update
             - logger.log: "Inactivity timeout: transitioned to FSM_IDLE"
+            - deep_sleep.enter: deep_sleep_component
 
 number:
   - platform: template
@@ -410,9 +415,9 @@ number:
           id(large_timer_set_duration) = x;
           id(large_timer_duration).publish_state(x);
 
-          if (id(fsm_state) == id(FSM_LARGE_TIMER)) { // Если большой таймер активен
-            id(timer) = x; // Обновить текущий таймер новой длительностью
-            id(current_total_duration) = x; // Обновить общую длительность
+          if (id(fsm_state) == id(FSM_LARGE_TIMER)) {
+            id(timer) = x;
+            id(current_total_duration) = x;
             id(interval_timer).execute();
           }
 
@@ -432,9 +437,9 @@ number:
           id(small_timer_set_duration) = x;
           id(small_timer_duration).publish_state(x);
 
-          if (id(fsm_state) == id(FSM_SMALL_TIMER)) { // Если малый таймер активен
-            id(timer) = x; // Обновить текущий таймер новой длительностью
-            id(current_total_duration) = x; // Обновить общую длительность
+          if (id(fsm_state) == id(FSM_SMALL_TIMER)) {
+            id(timer) = x;
+            id(current_total_duration) = x;
             id(interval_timer).execute();
           }
 
@@ -444,23 +449,25 @@ sensor:
     name: "Uptime Sensor"
     id: uptime_sensor
 
-  - platform: wifi_signal
-    name: "WiFi Signal"
-    update_interval: 30s
+  # - platform: wifi_signal
+  #   name: "WiFi Signal"
+  #   update_interval: 30s
 
   - platform: adc
     pin: GPIO34
     name: "Battery Voltage"
     unit_of_measurement: "V"
     icon: "mdi:battery"
-    attenuation: auto # Full range (0-3.3V)
-    update_interval: 60s # Check every minute
+    attenuation: auto
+    update_interval: 60s
     filters:
-      - calibrate_linear:
-          # Если ADC считывает 0В, напряжение батареи 0В
-          - 0 -> 0
-          # Если ADC считывает 2.1В (что соответствует 4.2В батареи с делителем 10k/10k), напряжение батареи 4.2В
-          - 2.1 -> 4.2
+      # - calibrate_linear:
+      #     - 0 -> 0
+      #     - 2.12 -> 4.187
+      - median:
+          window_size: 7
+          send_every: 4
+          send_first_at: 3
 
 
 button:
